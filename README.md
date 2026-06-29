@@ -371,7 +371,9 @@ Contributions are welcome! If you have ideas for new features, bug fixes, or imp
 
 ## Verification status
 
-The tool payloads are built to match Slack's documented `slackLists.*` API and are covered by unit tests. The write paths (`update_list_item`, `delete_list_item`) have been verified statically against the API reference, not yet against a live workspace. One shape is an educated default: checkbox cells are sent as `"checkbox": [bool]` (an array), matching what Slack returns from `slackLists.items.list` and every other cell value; if a live list ever rejects it, fall back to a bare bool. Confirm writes against a real list on first use.
+All tools are covered by unit tests and have been exercised against a live Slack workspace: `discover_list_columns`, `create_list_item`, `update_list_item` (text, user, date, and checkbox cells, including a single multi-cell "check off + reassign + reschedule" update), and `delete_list_item` all round-trip correctly.
+
+One field shape differs from the published docs: **checkbox cells take a bare boolean** (`"checkbox": true`), not an array. The docs show `"checkbox": [boolean]`, but the live API rejects the array form with `invalid_arguments` and returns the value as a bare bool, so this server sends a bare bool.
 
 ## Credits
 

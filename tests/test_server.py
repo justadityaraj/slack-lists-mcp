@@ -58,8 +58,8 @@ class TestFieldHelpers:
     def test_create_checkbox_field(self):
         field = create_checkbox_field("Col123", True)
         assert field["column_id"] == "Col123"
-        # Wrapped in a list to match Slack's response shape ("checkbox": [bool])
-        assert field["checkbox"] == [True]
+        # Checkbox is a bare bool, not an array (verified against the live API)
+        assert field["checkbox"] is True
 
 class TestFieldExtraction:
     """Test field value extraction from items"""
@@ -238,7 +238,7 @@ class TestBuildFieldPayload:
         assert build_field_payload("Col1", "select", ["completed"])["select"] == ["completed"]
 
     def test_checkbox(self):
-        assert build_field_payload("Col1", "checkbox", True)["checkbox"] == [True]
+        assert build_field_payload("Col1", "checkbox", True)["checkbox"] is True
 
     def test_number(self):
         assert build_field_payload("Col1", "number", 42)["number"] == [42]

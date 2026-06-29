@@ -208,14 +208,15 @@ def create_select_field(column_id: str, option_ids: List[str]) -> Dict[str, Any]
 def create_checkbox_field(column_id: str, checked: bool) -> Dict[str, Any]:
     """Helper to create a checkbox field.
 
-    The value is wrapped in a list to match the shape Slack returns from
-    slackLists.items.list ("checkbox": [boolean]) and to stay consistent with
-    every other typed cell value (date, user, select, number, ...), which are
-    all arrays on the slackLists.items.update path.
+    Checkbox is the one cell type that takes a bare boolean rather than an
+    array. Verified against the live API: the array form ([bool]) is rejected
+    with invalid_arguments on slackLists.items.update, and slackLists.items.list
+    returns the value as a bare bool. (The published docs show "checkbox":
+    [boolean], but the live API does not accept or return that shape.)
     """
     return {
         "column_id": column_id,
-        "checkbox": [bool(checked)]
+        "checkbox": bool(checked)
     }
 
 def create_number_field(column_id: str, number: Any) -> Dict[str, Any]:
