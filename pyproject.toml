@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "slack-lists-mcp"
+name = "ars-slack-lists-mcp"
 version = "1.1.0"
-description = "A Model Context Protocol (MCP) server for Slack Lists integration"
+description = "A Model Context Protocol (MCP) server for Slack Lists — full read AND write (create, update, check off, reassign, reschedule, delete, discover columns)"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -54,7 +54,7 @@ Repository = "https://github.com/justadityaraj/slack-lists-mcp.git"
 Issues = "https://github.com/justadityaraj/slack-lists-mcp/issues"
 
 [project.scripts]
-slack-lists-mcp = "slack_lists_server:main"
+ars-slack-lists-mcp = "slack_lists_server:main"
 
 [tool.hatch.build.targets.wheel]
 # Ship src/slack_lists_server.py as the top-level module `slack_lists_server`
