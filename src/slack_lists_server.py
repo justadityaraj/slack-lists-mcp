@@ -47,6 +47,32 @@ class SlackListsError(Exception):
     """Custom exception for Slack Lists operations"""
     pass
 
+def load_dotenv(env_path: Optional[str] = None) -> None:
+    """Load KEY=VALUE pairs from a .env file in the project root into os.environ.
+
+    Keeps the bot token out of the MCP host config: the secret can live only in
+    the gitignored .env next to this project. No third-party dependency, and a
+    real environment variable always wins over the file (existing keys are never
+    overwritten).
+    """
+    if env_path is None:
+        env_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
+        )
+    try:
+        with open(env_path, "r", encoding="utf-8-sig") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except FileNotFoundError:
+        pass
+
 class SlackListsClient:
     """Client for interacting with Slack Lists API"""
     
@@ -158,6 +184,7 @@ def get_slack_client() -> SlackListsClient:
     global slack_client
     
     if slack_client is None:
+        load_dotenv()
         token = os.getenv("SLACK_BOT_TOKEN")
         if not token:
             raise SlackListsError(
@@ -1017,6 +1044,7 @@ async def discover_list_columns(
 
 def main() -> None:
     """Console entry point: validate config and run the MCP server over stdio."""
+    load_dotenv()
     token = os.getenv("SLACK_BOT_TOKEN")
     if not token:
         logger.error("SLACK_BOT_TOKEN environment variable is required")

@@ -91,6 +91,8 @@ Open the `.env` file and set your `SLACK_BOT_TOKEN`:
 SLACK_BOT_TOKEN=xoxb-your-bot-token-here
 ```
 
+The server loads this `.env` (from the project root) automatically on startup, so you do not need to put the token anywhere else. A real `SLACK_BOT_TOKEN` environment variable always takes precedence over the file.
+
 ### 4. Running the Server
 
 You can run the server directly from the command line:
@@ -124,9 +126,17 @@ To use the server with an AI assistant, you need to configure your MCP host.
 }
 ```
 
-**Important**: Make sure to use the absolute path to your Python executable and the server script.
+**Important**: Make sure to use the absolute path to your Python executable and the server script. Because the server reads the token from the project `.env`, the `env` block above is optional.
 
 Once configured, restart your MCP host. The Slack Lists tools should now be available to your AI assistant.
+
+#### Claude Code (CLI)
+
+```bash
+claude mcp add slack-lists -s user -- /abs/path/.venv/bin/python /abs/path/slack-lists-mcp/src/slack_lists_server.py
+```
+
+No `-e SLACK_BOT_TOKEN=...` is needed; the server picks the token up from `.env`.
 
 
 

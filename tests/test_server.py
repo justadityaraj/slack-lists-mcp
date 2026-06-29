@@ -29,6 +29,7 @@ from slack_lists_server import (
     create_phone_field,
     build_field_payload,
     extract_field_value,
+    load_dotenv,
 )
 import slack_lists_server
 
@@ -151,14 +152,16 @@ class TestEnvironmentValidation:
     """Test environment variable validation"""
     
     def test_missing_token_raises_error(self):
+        # Stub the .env loader so it can't pull a real token from the project .env
         with patch.dict(os.environ, {}, clear=True):
             with patch('slack_lists_server.slack_client', None):
-                from slack_lists_server import get_slack_client
-                
-                with pytest.raises(SlackListsError) as exc_info:
-                    get_slack_client()
-                
-                assert "SLACK_BOT_TOKEN" in str(exc_info.value)
+                with patch('slack_lists_server.load_dotenv', lambda *a, **k: None):
+                    from slack_lists_server import get_slack_client
+
+                    with pytest.raises(SlackListsError) as exc_info:
+                        get_slack_client()
+
+                    assert "SLACK_BOT_TOKEN" in str(exc_info.value)
     
     def test_valid_token_creates_client(self):
         with patch.dict(os.environ, {"SLACK_BOT_TOKEN": "test-token"}):
@@ -181,6 +184,29 @@ class TestJSONParsing:
         json_str = '{"invalid": json}'
         with pytest.raises(json.JSONDecodeError):
             json.loads(json_str)
+
+class TestLoadDotenv:
+    """Test the zero-dependency .env loader"""
+
+    def test_loads_missing_keys(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text('SLACK_BOT_TOKEN="xoxb-from-file"\n# comment\nFOO=bar\n')
+        with patch.dict(os.environ, {}, clear=True):
+            load_dotenv(str(env_file))
+            assert os.environ["SLACK_BOT_TOKEN"] == "xoxb-from-file"
+            assert os.environ["FOO"] == "bar"
+
+    def test_real_env_wins_over_file(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("SLACK_BOT_TOKEN=xoxb-from-file\n")
+        with patch.dict(os.environ, {"SLACK_BOT_TOKEN": "xoxb-real"}, clear=True):
+            load_dotenv(str(env_file))
+            assert os.environ["SLACK_BOT_TOKEN"] == "xoxb-real"
+
+    def test_missing_file_is_noop(self, tmp_path):
+        with patch.dict(os.environ, {}, clear=True):
+            load_dotenv(str(tmp_path / "does-not-exist.env"))  # should not raise
+
 
 class TestNewFieldHelpers:
     """Test the number / email / phone field helpers added for full type support"""
