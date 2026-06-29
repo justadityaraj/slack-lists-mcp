@@ -16,7 +16,7 @@ maintainers = [
 ]
 keywords = ["mcp", "slack", "lists", "ai", "assistant", "protocol"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",

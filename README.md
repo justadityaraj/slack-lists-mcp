@@ -4,7 +4,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP Version](https://img.shields.io/badge/MCP-1.2.0%2B-brightgreen.svg)](https://modelcontextprotocol.io/)
 
-**A production-ready Model Context Protocol (MCP) server that provides AI assistants with powerful tools to interact with Slack Lists.**
+**A Model Context Protocol (MCP) server that gives AI assistants full read and write access to Slack Lists.**
 
 This server acts as a bridge between AI models and Slack, enabling seamless creation, retrieval, updating, deletion, filtering, and management of Slack List items through a standardized protocol. It empowers AI assistants like Claude Desktop to become powerful productivity tools for managing tasks, projects, and data within Slack.
 
@@ -15,7 +15,7 @@ This project provides a complete package with:
 - **Detailed Documentation**: Full README, tool reference, and examples.
 - **Extensible Design**: Easily add new tools and functionality.
 
-Whether you're a developer looking to integrate AI with Slack or a user wanting to supercharge your productivity, this MCP server provides the foundation for powerful, context-aware interactions with your Slack Lists.
+The write paths have been verified against a live Slack workspace (see [Verification status](#verification-status)).
 
 
 
