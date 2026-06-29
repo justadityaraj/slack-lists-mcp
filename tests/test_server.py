@@ -17,15 +17,20 @@ import asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from slack_lists_server import (
-    SlackListsClient, 
+    SlackListsClient,
     SlackListsError,
     create_text_field,
     create_date_field,
     create_user_field,
     create_select_field,
     create_checkbox_field,
-    extract_field_value
+    create_number_field,
+    create_email_field,
+    create_phone_field,
+    build_field_payload,
+    extract_field_value,
 )
+import slack_lists_server
 
 class TestFieldHelpers:
     """Test field creation helper functions"""
@@ -53,7 +58,8 @@ class TestFieldHelpers:
     def test_create_checkbox_field(self):
         field = create_checkbox_field("Col123", True)
         assert field["column_id"] == "Col123"
-        assert field["checkbox"] is True
+        # Wrapped in a list to match Slack's response shape ("checkbox": [bool])
+        assert field["checkbox"] == [True]
 
 class TestFieldExtraction:
     """Test field value extraction from items"""
@@ -176,6 +182,224 @@ class TestJSONParsing:
         with pytest.raises(json.JSONDecodeError):
             json.loads(json_str)
 
+class TestNewFieldHelpers:
+    """Test the number / email / phone field helpers added for full type support"""
+
+    def test_create_number_field(self):
+        field = create_number_field("Col123", 42)
+        assert field["column_id"] == "Col123"
+        assert field["number"] == [42]
+
+    def test_create_number_field_list_passthrough(self):
+        field = create_number_field("Col123", [42])
+        assert field["number"] == [42]
+
+    def test_create_email_field(self):
+        field = create_email_field("Col123", "user@example.com")
+        assert field["email"] == ["user@example.com"]
+
+    def test_create_phone_field(self):
+        field = create_phone_field("Col123", "+1-555-123-4567")
+        assert field["phone"] == ["+1-555-123-4567"]
+
+
+class TestBuildFieldPayload:
+    """Test the shared field/cell builder used by create and update"""
+
+    def test_text(self):
+        field = build_field_payload("Col1", "text", "hello")
+        assert field["column_id"] == "Col1"
+        assert field["rich_text"][0]["elements"][0]["elements"][0]["text"] == "hello"
+
+    def _text_of(self, field):
+        return field["rich_text"][0]["elements"][0]["elements"][0]["text"]
+
+    def test_text_coerces_number_to_string(self):
+        field = build_field_payload("Col1", "text", 42)
+        assert self._text_of(field) == "42"
+
+    def test_text_unwraps_single_element_list(self):
+        field = build_field_payload("Col1", "text", ["hello"])
+        assert self._text_of(field) == "hello"
+
+    def test_date_scalar(self):
+        assert build_field_payload("Col1", "date", "2025-09-20")["date"] == ["2025-09-20"]
+
+    def test_date_single_element_list(self):
+        assert build_field_payload("Col1", "date", ["2025-09-20"])["date"] == ["2025-09-20"]
+
+    def test_user_scalar_is_coerced_to_list(self):
+        assert build_field_payload("Col1", "user", "U1")["user"] == ["U1"]
+
+    def test_user_list(self):
+        assert build_field_payload("Col1", "user", ["U1", "U2"])["user"] == ["U1", "U2"]
+
+    def test_select_list(self):
+        assert build_field_payload("Col1", "select", ["completed"])["select"] == ["completed"]
+
+    def test_checkbox(self):
+        assert build_field_payload("Col1", "checkbox", True)["checkbox"] == [True]
+
+    def test_number(self):
+        assert build_field_payload("Col1", "number", 42)["number"] == [42]
+
+    def test_email(self):
+        assert build_field_payload("Col1", "email", "a@b.com")["email"] == ["a@b.com"]
+
+    def test_phone(self):
+        assert build_field_payload("Col1", "phone", "+1")["phone"] == ["+1"]
+
+    def test_type_is_case_insensitive(self):
+        assert build_field_payload("Col1", "DATE", "2025-09-20")["date"] == ["2025-09-20"]
+
+    def test_unknown_type_raises_value_error(self):
+        with pytest.raises(ValueError):
+            build_field_payload("Col1", "bogus", "x")
+
+
+class TestUpdateDeleteClient:
+    """Test the update/delete client methods build the right endpoint + payload"""
+
+    @pytest.mark.asyncio
+    async def test_update_list_item_endpoint_and_payload(self):
+        client = SlackListsClient("test-token")
+        client._make_request = AsyncMock(return_value={"ok": True})
+
+        cells = [{"column_id": "Col1", "row_id": "Rec1", "select": ["completed"]}]
+        await client.update_list_item("F1", cells)
+
+        args, kwargs = client._make_request.call_args
+        assert args[0] == "POST"
+        assert args[1] == "slackLists.items.update"
+        assert kwargs["json"] == {"list_id": "F1", "cells": cells}
+
+    @pytest.mark.asyncio
+    async def test_delete_list_item_endpoint_and_payload(self):
+        client = SlackListsClient("test-token")
+        client._make_request = AsyncMock(return_value={"ok": True})
+
+        await client.delete_list_item("F1", "Rec1")
+
+        args, kwargs = client._make_request.call_args
+        assert args[0] == "POST"
+        assert args[1] == "slackLists.items.delete"
+        assert kwargs["json"] == {"list_id": "F1", "id": "Rec1"}
+
+
+def _resolve(tool):
+    """FastMCP may wrap a tool function in an object exposing .fn; unwrap it."""
+    return getattr(tool, "fn", tool)
+
+
+class TestUpdateDeleteTools:
+    """Test the update/delete/discover MCP tools end-to-end with a mocked client"""
+
+    @pytest.mark.asyncio
+    async def test_update_tool_injects_row_id_into_every_cell(self, monkeypatch):
+        mock_client = AsyncMock()
+        mock_client.update_list_item = AsyncMock(return_value={"ok": True})
+        monkeypatch.setattr(slack_lists_server, "get_slack_client", lambda: mock_client)
+
+        fields = json.dumps([
+            {"column_id": "Col1", "type": "select", "value": ["completed"]},
+            {"column_id": "Col2", "type": "user", "value": ["U1"]},
+        ])
+        result = await _resolve(slack_lists_server.update_list_item)(
+            list_id="F1", row_id="Rec1", fields=fields
+        )
+
+        assert "Successfully updated" in result
+        args, kwargs = mock_client.update_list_item.call_args
+        called_list_id = args[0] if args else kwargs.get("list_id")
+        cells = args[1] if len(args) > 1 else kwargs.get("cells")
+        assert called_list_id == "F1"
+        assert all(cell["row_id"] == "Rec1" for cell in cells)
+        assert cells[0]["select"] == ["completed"]
+        assert cells[1]["user"] == ["U1"]
+
+    @pytest.mark.asyncio
+    async def test_update_tool_rejects_bad_json(self, monkeypatch):
+        monkeypatch.setattr(slack_lists_server, "get_slack_client", lambda: AsyncMock())
+        result = await _resolve(slack_lists_server.update_list_item)(
+            list_id="F1", row_id="Rec1", fields="{not json}"
+        )
+        assert "Error parsing" in result
+
+    @pytest.mark.asyncio
+    async def test_update_tool_rejects_unknown_type(self, monkeypatch):
+        monkeypatch.setattr(slack_lists_server, "get_slack_client", lambda: AsyncMock())
+        fields = json.dumps([{"column_id": "Col1", "type": "bogus", "value": "x"}])
+        result = await _resolve(slack_lists_server.update_list_item)(
+            list_id="F1", row_id="Rec1", fields=fields
+        )
+        assert "Unsupported field type" in result
+
+    @pytest.mark.asyncio
+    async def test_delete_tool_calls_client(self, monkeypatch):
+        mock_client = AsyncMock()
+        mock_client.delete_list_item = AsyncMock(return_value={"ok": True})
+        monkeypatch.setattr(slack_lists_server, "get_slack_client", lambda: mock_client)
+
+        result = await _resolve(slack_lists_server.delete_list_item)(
+            list_id="F1", row_id="Rec1"
+        )
+
+        assert "deleted" in result.lower()
+        args, kwargs = mock_client.delete_list_item.call_args
+        assert (args[0] if args else kwargs.get("list_id")) == "F1"
+        assert (args[1] if len(args) > 1 else kwargs.get("item_id")) == "Rec1"
+
+    @pytest.mark.asyncio
+    async def test_discover_columns_infers_schema(self, monkeypatch):
+        page = {
+            "ok": True,
+            "items": [
+                {"id": "Rec1", "fields": [
+                    {"column_id": "Col1", "select": ["completed"], "value": "completed"},
+                    {"column_id": "Col2", "user": ["U1"], "value": "U1"},
+                ]},
+            ],
+            "response_metadata": {"next_cursor": ""},
+        }
+        mock_client = AsyncMock()
+        mock_client.get_list_items = AsyncMock(return_value=page)
+        monkeypatch.setattr(slack_lists_server, "get_slack_client", lambda: mock_client)
+
+        result = await _resolve(slack_lists_server.discover_list_columns)(
+            list_id="F1", sample_size=10
+        )
+
+        assert "Col1" in result
+        assert "Col2" in result
+        assert "type: select" in result
+        assert "select options: completed" in result
+
+    @pytest.mark.asyncio
+    async def test_discover_columns_infers_text_from_value_only_field(self, monkeypatch):
+        # A plain-text column can arrive with only the generic "value" (no typed
+        # key); it should be reported as text, not unknown.
+        page = {
+            "ok": True,
+            "items": [
+                {"id": "Rec1", "fields": [
+                    {"column_id": "Col9", "key": "title", "value": "Hello world"},
+                ]},
+            ],
+            "response_metadata": {"next_cursor": ""},
+        }
+        mock_client = AsyncMock()
+        mock_client.get_list_items = AsyncMock(return_value=page)
+        monkeypatch.setattr(slack_lists_server, "get_slack_client", lambda: mock_client)
+
+        result = await _resolve(slack_lists_server.discover_list_columns)(
+            list_id="F1", sample_size=10
+        )
+
+        assert "Col9" in result
+        assert "type: text" in result
+        assert "unknown" not in result
+
+
 # Integration test helpers (require actual Slack setup)
 class TestIntegrationHelpers:
     """Helper functions for integration testing with real Slack API"""
@@ -242,4 +466,6 @@ if __name__ == "__main__":
     print("- TEST_LIST_ID: A test list ID (e.g., F1234ABCD)")
     print("- TEST_TITLE_COLUMN_ID: Title column ID (optional, defaults to Col10000000)")
     print("\nThen run: pytest tests/test_server.py -v")
+
+# by Aditya Raj Singh — https://adityarajsingh.com/
 

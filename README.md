@@ -6,12 +6,10 @@
 
 **A production-ready Model Context Protocol (MCP) server that provides AI assistants with powerful tools to interact with Slack Lists.**
 
-This server acts as a bridge between AI models and Slack, enabling seamless creation, retrieval, filtering, and management of Slack List items through a standardized protocol. It empowers AI assistants like Claude Desktop to become powerful productivity tools for managing tasks, projects, and data within Slack.
+This server acts as a bridge between AI models and Slack, enabling seamless creation, retrieval, updating, deletion, filtering, and management of Slack List items through a standardized protocol. It empowers AI assistants like Claude Desktop to become powerful productivity tools for managing tasks, projects, and data within Slack.
 
-![Server Demo](https://i.imgur.com/example.gif)  <!-- Replace with actual demo GIF -->
-
-This project provides a complete, production-ready package with:
-- **Comprehensive Toolset**: Create, query, filter, and export list items.
+This project provides a complete package with:
+- **Comprehensive Toolset**: Create, query, update, delete, filter, and export list items.
 - **Robust Implementation**: Built with Python, FastMCP, and best practices.
 - **Easy Deployment**: Simple setup with environment variables.
 - **Detailed Documentation**: Full README, tool reference, and examples.
@@ -29,12 +27,14 @@ This MCP server provides a rich set of tools for interacting with Slack Lists:
 - **Create Single Item**: Add one item to a list with detailed fields.
 - **Bulk Create Items**: Add multiple items at once with built-in rate limiting to respect Slack's API.
 - **Retrieve Items**: Fetch a list of items with optional metadata.
+- **Update Items**: Update any cell on an existing item — check a task off, reassign it, reschedule it, or edit any field (full task management).
+- **Delete Items**: Permanently remove an item from a list.
+- **Discover Columns**: Infer a list's column IDs, types, and select option IDs from its existing items (Slack exposes no schema API, so this saves you from hunting for IDs in browser dev tools).
 - **Filter Items**: Powerful server-side filtering based on any field value (status, assignee, priority, etc.).
 - **Export Data**: Export list items to JSON or CSV format for analysis or backup.
 - **Subtask Creation**: Create sub-items under a parent item.
-- **Full Field Support**: Works with all Slack List field types (text, date, user, select, checkbox, etc.).
+- **Full Field Support**: Works with all Slack List field types (text, date, user, select, checkbox, number, email, phone).
 - **Error Handling**: Robust error handling and clear feedback for failed operations.
-- **Production Ready**: Includes logging, environment-based configuration, and a clean project structure.
 
 
 
@@ -66,8 +66,8 @@ Clone the repository and install the dependencies:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/slack-lists-mcp-server.git
-cd slack-lists-mcp-server
+git clone https://github.com/justadityaraj/slack-lists-mcp.git
+cd slack-lists-mcp
 
 # Create and activate a virtual environment
 python3 -m venv .venv
@@ -227,7 +227,50 @@ This tool exports list items to JSON or CSV format, with optional filtering. Use
 **Example Prompt:**
 > "Export all completed tasks from my project list `F1234ABCD` to a CSV file."
 
+---
 
+### `update_list_item`
+
+Updates one or more cells on an existing Slack List item (row). This is the tool for full task management: check a task off, reassign it, reschedule it, or edit any field — in a single call.
+
+**Description:**
+Updates the given columns on the item identified by `row_id`. Find the `row_id` with `get_list_items` or `filter_list_items` (it is each item's `id`, e.g. `Rec1234567`). Find `column_id`s and select option IDs with `discover_list_columns`.
+
+**Parameters:**
+- `list_id` (string, required): The ID of the Slack List (e.g., `F1234ABCD`).
+- `row_id` (string, required): The ID of the item/row to update (e.g., `Rec1234567`).
+- `fields` (string, required): JSON array of cells to update. Each cell is `{"column_id": "...", "type": "...", "value": ...}`. See [Field Formats](#field-formats). Supported types: `text`, `date`, `user`, `select`, `checkbox`, `number`, `email`, `phone`.
+
+**Example Prompt:**
+> "Mark task `Rec1234567` in list `F1234ABCD` as done, reassign it to `U1234567`, and move the due date to 2025-09-20."
+
+---
+
+### `delete_list_item`
+
+Permanently deletes an item (row) from a Slack List. This cannot be undone.
+
+**Parameters:**
+- `list_id` (string, required): The ID of the Slack List (e.g., `F1234ABCD`).
+- `row_id` (string, required): The ID of the item/row to delete (e.g., `Rec1234567`).
+
+**Example Prompt:**
+> "Delete item `Rec1234567` from list `F1234ABCD`."
+
+---
+
+### `discover_list_columns`
+
+Discovers a list's columns by inspecting its existing items. Slack exposes no API to read a list's schema directly, so this infers each column's ID, type, a sample value, and (for select columns) the option IDs from the data already in the list. Use it to find the `column_id` and select option IDs needed by `create_list_item` and `update_list_item`.
+
+**Note:** A column is only discoverable if at least one item has a value in it. Empty columns will not appear.
+
+**Parameters:**
+- `list_id` (string, required): The ID of the Slack List (e.g., `F1234ABCD`).
+- `sample_size` (integer, optional): How many items to scan, 1-1000 (default: 100).
+
+**Example Prompt:**
+> "What columns does list `F1234ABCD` have, and what are the status option IDs?"
 
 
 ## Data Formats
@@ -320,14 +363,24 @@ The `filter_list_items` tool supports the following operators:
 ## How to Find List and Column IDs
 
 1. **List ID**: Open the list in Slack. The ID is the last part of the URL (e.g., `https://app.slack.com/client/.../F1234ABCD`).
-2. **Column ID**: You can find column IDs by inspecting the network requests in your browser's developer tools when you interact with the list, or by using the `get_list_items` tool and examining the output.
+2. **Column ID**: The easiest way is the `discover_list_columns` tool, which lists every column's ID, type, and select option IDs by inspecting the list's existing items. (You can also inspect browser network requests, or read the raw output of `get_list_items`.)
 
 ## Contributing
 
 Contributions are welcome! If you have ideas for new features, bug fixes, or improvements, please open an issue or submit a pull request. See `CONTRIBUTING.md` for more details.
 
+## Verification status
+
+The tool payloads are built to match Slack's documented `slackLists.*` API and are covered by unit tests. The write paths (`update_list_item`, `delete_list_item`) have been verified statically against the API reference, not yet against a live workspace. One shape is an educated default: checkbox cells are sent as `"checkbox": [bool]` (an array), matching what Slack returns from `slackLists.items.list` and every other cell value; if a live list ever rejects it, fall back to a bare bool. Confirm writes against a real list on first use.
+
+## Credits
+
+This project is derived from [maplehilllabs/mcp-slack-lists](https://github.com/maplehilllabs/mcp-slack-lists) (MIT), extended with `update_list_item`, `delete_list_item`, and `discover_list_columns` plus full field-type support.
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+<!-- by [Aditya Raj Singh](https://adityarajsingh.com/) -->
 
 

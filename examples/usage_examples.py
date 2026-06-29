@@ -122,6 +122,38 @@ export_filtered_csv_example = {
     }
 }
 
+# Example 9: Update an item (check off + reassign + reschedule in one call)
+update_item_example = {
+    "tool": "update_list_item",
+    "parameters": {
+        "list_id": "F1234ABCD",
+        "row_id": "Rec1234567",
+        "fields": '''[
+            {"column_id": "Col10000002", "type": "select", "value": ["completed"]},
+            {"column_id": "Col10000003", "type": "user", "value": ["U1234567"]},
+            {"column_id": "Col10000001", "type": "date", "value": "2025-09-20"}
+        ]'''
+    }
+}
+
+# Example 10: Delete an item
+delete_item_example = {
+    "tool": "delete_list_item",
+    "parameters": {
+        "list_id": "F1234ABCD",
+        "row_id": "Rec1234567"
+    }
+}
+
+# Example 11: Discover a list's columns and select option IDs
+discover_columns_example = {
+    "tool": "discover_list_columns",
+    "parameters": {
+        "list_id": "F1234ABCD",
+        "sample_size": 100
+    }
+}
+
 # Common AI Assistant Prompts
 ai_prompts = {
     "create_task": "Create a new task in my project list F1234ABCD with title 'Review code changes' and due date 2024-12-15",
@@ -137,8 +169,16 @@ ai_prompts = {
     "completed_tasks": "Export all completed tasks from list F1234ABCD to CSV format",
     
     "overdue_items": "Find all items in list F1234ABCD that don't have a due date set",
-    
-    "status_report": "Give me a summary of all items in list F1234ABCD grouped by status"
+
+    "status_report": "Give me a summary of all items in list F1234ABCD grouped by status",
+
+    "complete_task": "Mark task Rec1234567 in list F1234ABCD as completed and reassign it to U1234567",
+
+    "reschedule_task": "Move the due date of Rec1234567 in list F1234ABCD to 2025-09-20",
+
+    "delete_task": "Delete item Rec1234567 from list F1234ABCD",
+
+    "discover_schema": "What columns does list F1234ABCD have, and what are its status option IDs?"
 }
 
 # Field Type Reference
@@ -200,6 +240,11 @@ if __name__ == "__main__":
     print("- get_list_items: Retrieve items from a list")
     print("- filter_list_items: Filter items by field values")
     print("- export_list_items: Export items to JSON or CSV")
+    print("- update_list_item: Update cells on an item (check off / reassign / reschedule)")
+    print("- delete_list_item: Delete an item from a list")
+    print("- discover_list_columns: Infer a list's column IDs, types, and select options")
     print()
     print("See the examples above for detailed usage patterns.")
+
+# by Aditya Raj Singh — https://adityarajsingh.com/
 

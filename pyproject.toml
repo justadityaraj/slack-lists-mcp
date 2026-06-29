@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "slack-lists-mcp-server"
-version = "1.0.0"
+name = "slack-lists-mcp"
+version = "1.1.0"
 description = "A Model Context Protocol (MCP) server for Slack Lists integration"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "MCP Slack Lists Server", email = "mcp@example.com"}
+    {name = "Aditya Raj Singh", email = "aditya@bncw.in"}
 ]
 maintainers = [
-    {name = "MCP Slack Lists Server", email = "mcp@example.com"}
+    {name = "Aditya Raj Singh", email = "aditya@bncw.in"}
 ]
 keywords = ["mcp", "slack", "lists", "ai", "assistant", "protocol"]
 classifiers = [
@@ -48,16 +48,19 @@ logging = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/slack-lists-mcp-server"
-Documentation = "https://github.com/your-org/slack-lists-mcp-server#readme"
-Repository = "https://github.com/your-org/slack-lists-mcp-server.git"
-Issues = "https://github.com/your-org/slack-lists-mcp-server/issues"
+Homepage = "https://github.com/justadityaraj/slack-lists-mcp"
+Documentation = "https://github.com/justadityaraj/slack-lists-mcp#readme"
+Repository = "https://github.com/justadityaraj/slack-lists-mcp.git"
+Issues = "https://github.com/justadityaraj/slack-lists-mcp/issues"
 
 [project.scripts]
 slack-lists-mcp = "slack_lists_server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+# Ship src/slack_lists_server.py as the top-level module `slack_lists_server`
+# so the console script entry point (slack_lists_server:main) resolves.
+sources = ["src"]
+only-include = ["src/slack_lists_server.py"]
 
 [tool.black]
 line-length = 100

@@ -98,30 +98,57 @@ class SlackListsClient:
         
         return await self._make_request("POST", "slackLists.items.create", json=payload)
     
-    async def get_list_items(self, list_id: str, limit: int = 100, 
+    async def get_list_items(self, list_id: str, limit: int = 100,
                            cursor: Optional[str] = None) -> Dict[str, Any]:
-        """Get items from a Slack List with pagination"""
-        params = {"list_id": list_id, "limit": limit}
+        """Get items from a Slack List with pagination.
+
+        slackLists.items.list is a POST method, so the arguments are sent in the
+        JSON body rather than as query parameters.
+        """
+        payload: Dict[str, Any] = {"list_id": list_id, "limit": limit}
         if cursor:
-            params["cursor"] = cursor
-        
-        return await self._make_request("GET", "slackLists.items.list", params=params)
+            payload["cursor"] = cursor
+
+        return await self._make_request("POST", "slackLists.items.list", json=payload)
     
     async def get_all_list_items(self, list_id: str) -> List[Dict[str, Any]]:
         """Get all items from a Slack List (handles pagination)"""
         all_items = []
         cursor = None
-        
+
         while True:
             data = await self.get_list_items(list_id, cursor=cursor)
             items = data.get("items", [])
             all_items.extend(items)
-            
+
             cursor = data.get("response_metadata", {}).get("next_cursor")
             if not cursor:
                 break
-        
+
         return all_items
+
+    async def update_list_item(self, list_id: str,
+                               cells: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Update one or more cells on an existing Slack List item.
+
+        Each cell must contain a "row_id" and "column_id" plus the typed value
+        key (e.g. "select", "user", "date", "rich_text").
+        """
+        payload = {
+            "list_id": list_id,
+            "cells": cells
+        }
+
+        return await self._make_request("POST", "slackLists.items.update", json=payload)
+
+    async def delete_list_item(self, list_id: str, item_id: str) -> Dict[str, Any]:
+        """Delete an item (row) from a Slack List."""
+        payload = {
+            "list_id": list_id,
+            "id": item_id
+        }
+
+        return await self._make_request("POST", "slackLists.items.delete", json=payload)
 
 # Global client instance (will be initialized with token)
 slack_client: Optional[SlackListsClient] = None
@@ -179,11 +206,75 @@ def create_select_field(column_id: str, option_ids: List[str]) -> Dict[str, Any]
     }
 
 def create_checkbox_field(column_id: str, checked: bool) -> Dict[str, Any]:
-    """Helper to create a checkbox field"""
+    """Helper to create a checkbox field.
+
+    The value is wrapped in a list to match the shape Slack returns from
+    slackLists.items.list ("checkbox": [boolean]) and to stay consistent with
+    every other typed cell value (date, user, select, number, ...), which are
+    all arrays on the slackLists.items.update path.
+    """
     return {
         "column_id": column_id,
-        "checkbox": checked
+        "checkbox": [bool(checked)]
     }
+
+def create_number_field(column_id: str, number: Any) -> Dict[str, Any]:
+    """Helper to create a number field"""
+    return {
+        "column_id": column_id,
+        "number": number if isinstance(number, list) else [number]
+    }
+
+def create_email_field(column_id: str, email: Any) -> Dict[str, Any]:
+    """Helper to create an email field"""
+    return {
+        "column_id": column_id,
+        "email": email if isinstance(email, list) else [email]
+    }
+
+def create_phone_field(column_id: str, phone: Any) -> Dict[str, Any]:
+    """Helper to create a phone field"""
+    return {
+        "column_id": column_id,
+        "phone": phone if isinstance(phone, list) else [phone]
+    }
+
+def build_field_payload(column_id: str, field_type: str, value: Any) -> Dict[str, Any]:
+    """Build a single Slack List cell/field payload for the given type.
+
+    Shared by create and update so every code path supports the same field
+    types and produces identical payloads. Returns a dict shaped like
+    {"column_id": ..., "<type>": ...}; callers that update existing rows add
+    a "row_id" key afterwards.
+
+    Raises ValueError for unknown field types so callers can surface a clear
+    error instead of silently dropping data.
+    """
+    ft = (field_type or "").lower()
+
+    if ft == "text":
+        # Unwrap a single-element list and coerce to str so a number or an
+        # accidentally-listed value never lands raw inside the rich_text block.
+        text_value = value[0] if isinstance(value, list) and value else value
+        return create_text_field(column_id, str(text_value))
+    if ft == "date":
+        # Accept either a scalar "YYYY-MM-DD" or a single-element list.
+        date_value = value[0] if isinstance(value, list) and value else value
+        return create_date_field(column_id, date_value)
+    if ft == "user":
+        return create_user_field(column_id, value if isinstance(value, list) else [value])
+    if ft == "select":
+        return create_select_field(column_id, value if isinstance(value, list) else [value])
+    if ft == "checkbox":
+        return create_checkbox_field(column_id, bool(value))
+    if ft == "number":
+        return create_number_field(column_id, value)
+    if ft == "email":
+        return create_email_field(column_id, value)
+    if ft == "phone":
+        return create_phone_field(column_id, value)
+
+    raise ValueError(f"Unsupported field type: {field_type}")
 
 def extract_field_value(item: Dict[str, Any], column_id: str) -> Any:
     """Extract the value of a specific field from an item"""
@@ -254,25 +345,15 @@ async def create_list_item(
             try:
                 extra_fields = json.loads(additional_fields)
                 for field_def in extra_fields:
-                    column_id = field_def["column_id"]
-                    field_type = field_def["type"]
-                    value = field_def["value"]
-                    
-                    if field_type == "text":
-                        fields.append(create_text_field(column_id, value))
-                    elif field_type == "date":
-                        fields.append(create_date_field(column_id, value))
-                    elif field_type == "user":
-                        user_ids = value if isinstance(value, list) else [value]
-                        fields.append(create_user_field(column_id, user_ids))
-                    elif field_type == "select":
-                        option_ids = value if isinstance(value, list) else [value]
-                        fields.append(create_select_field(column_id, option_ids))
-                    elif field_type == "checkbox":
-                        fields.append(create_checkbox_field(column_id, bool(value)))
-                    else:
-                        logger.warning(f"Unsupported field type: {field_type}")
-                        
+                    try:
+                        fields.append(build_field_payload(
+                            field_def["column_id"],
+                            field_def["type"],
+                            field_def["value"]
+                        ))
+                    except ValueError as e:
+                        logger.warning(str(e))
+
             except json.JSONDecodeError as e:
                 return f"Error parsing additional_fields JSON: {str(e)}"
         
@@ -344,22 +425,14 @@ async def create_multiple_list_items(
                 
                 # Add additional fields
                 for field_def in item_data.get("fields", []):
-                    column_id = field_def["column_id"]
-                    field_type = field_def["type"]
-                    value = field_def["value"]
-                    
-                    if field_type == "text":
-                        fields.append(create_text_field(column_id, value))
-                    elif field_type == "date":
-                        fields.append(create_date_field(column_id, value))
-                    elif field_type == "user":
-                        user_ids = value if isinstance(value, list) else [value]
-                        fields.append(create_user_field(column_id, user_ids))
-                    elif field_type == "select":
-                        option_ids = value if isinstance(value, list) else [value]
-                        fields.append(create_select_field(column_id, option_ids))
-                    elif field_type == "checkbox":
-                        fields.append(create_checkbox_field(column_id, bool(value)))
+                    try:
+                        fields.append(build_field_payload(
+                            field_def["column_id"],
+                            field_def["type"],
+                            field_def["value"]
+                        ))
+                    except ValueError as e:
+                        logger.warning(str(e))
                 
                 # Create the item
                 result = await client.create_list_item(list_id, fields)
@@ -718,24 +791,249 @@ async def export_list_items(
         
         else:
             return f"❌ Unsupported export format: {export_format}. Use 'json' or 'csv'."
-        
+
     except SlackListsError as e:
         return f"❌ Slack Lists error: {str(e)}"
     except Exception as e:
         logger.error(f"Unexpected error in export_list_items: {str(e)}")
         return f"❌ Unexpected error: {str(e)}"
 
+@mcp.tool()
+async def update_list_item(
+    list_id: str,
+    row_id: str,
+    fields: str
+) -> str:
+    """Update one or more cells on an existing Slack List item (row).
+
+    This is the tool for full task management: check a task off (update its
+    status/select or checkbox column), reassign it (user column), reschedule it
+    (date column), or edit any other field. You can update several columns in a
+    single call.
+
+    To find the row_id of an item, use get_list_items or filter_list_items (it
+    is each item's "id", e.g. Rec1234567). To find column IDs and select option
+    IDs, use discover_list_columns.
+
+    Args:
+        list_id: The ID of the Slack List (format: F1234ABCD)
+        row_id: The ID of the item/row to update (format: Rec1234567)
+        fields: JSON array of cells to update. Each cell is
+                {"column_id": "...", "type": "...", "value": ...}. Format:
+                [{"column_id": "Col10000002", "type": "select", "value": ["completed"]},
+                 {"column_id": "Col10000003", "type": "user", "value": ["U1234567"]},
+                 {"column_id": "Col10000004", "type": "date", "value": "2025-09-20"}]
+                Supported types: text, date, user, select, checkbox, number,
+                email, phone.
+
+    Returns:
+        Success message listing the columns that were updated
+    """
+    try:
+        client = get_slack_client()
+
+        # Parse the requested cells
+        try:
+            field_defs = json.loads(fields)
+        except json.JSONDecodeError as e:
+            return f"❌ Error parsing fields JSON: {str(e)}"
+
+        if not isinstance(field_defs, list) or not field_defs:
+            return "❌ fields must be a non-empty JSON array of cells to update"
+
+        # Build the cells payload, injecting the row_id into each cell
+        cells = []
+        updated_columns = []
+        for field_def in field_defs:
+            try:
+                cell = build_field_payload(
+                    field_def["column_id"],
+                    field_def["type"],
+                    field_def["value"]
+                )
+            except ValueError as e:
+                return f"❌ {str(e)}"
+            except KeyError as e:
+                return f"❌ Each cell needs column_id, type and value (missing {str(e)})"
+
+            cell["row_id"] = row_id
+            cells.append(cell)
+            updated_columns.append(field_def["column_id"])
+
+        await client.update_list_item(list_id, cells)
+
+        return f"✅ Successfully updated list item!\n" \
+               f"Item ID: {row_id}\n" \
+               f"List ID: {list_id}\n" \
+               f"Updated columns: {', '.join(updated_columns)}"
+
+    except SlackListsError as e:
+        return f"❌ Slack Lists error: {str(e)}"
+    except Exception as e:
+        logger.error(f"Unexpected error in update_list_item: {str(e)}")
+        return f"❌ Unexpected error: {str(e)}"
+
+@mcp.tool()
+async def delete_list_item(
+    list_id: str,
+    row_id: str
+) -> str:
+    """Permanently delete an item (row) from a Slack List.
+
+    This action cannot be undone. To find the row_id, use get_list_items or
+    filter_list_items (it is each item's "id", e.g. Rec1234567).
+
+    Args:
+        list_id: The ID of the Slack List (format: F1234ABCD)
+        row_id: The ID of the item/row to delete (format: Rec1234567)
+
+    Returns:
+        Success message confirming the deletion
+    """
+    try:
+        client = get_slack_client()
+
+        await client.delete_list_item(list_id, row_id)
+
+        return f"🗑️ Successfully deleted list item!\n" \
+               f"Item ID: {row_id}\n" \
+               f"List ID: {list_id}"
+
+    except SlackListsError as e:
+        return f"❌ Slack Lists error: {str(e)}"
+    except Exception as e:
+        logger.error(f"Unexpected error in delete_list_item: {str(e)}")
+        return f"❌ Unexpected error: {str(e)}"
+
+@mcp.tool()
+async def discover_list_columns(
+    list_id: str,
+    sample_size: int = 100
+) -> str:
+    """Discover a Slack List's columns by inspecting its existing items.
+
+    Slack has no API to fetch a List's schema directly, so this infers the
+    columns from the data already in the list: for each column it reports the
+    column ID, the field type seen in the data, a sample value, and (for select
+    columns) the option IDs observed. Use this to find the column_id and select
+    option IDs needed by create_list_item and update_list_item.
+
+    Note: a column is only discoverable if at least one item has a value in it.
+    Empty columns will not appear.
+
+    Args:
+        list_id: The ID of the Slack List (format: F1234ABCD)
+        sample_size: How many items to scan, 1-1000 (default: 100)
+
+    Returns:
+        A formatted summary of the discovered columns
+    """
+    try:
+        client = get_slack_client()
+
+        sample_size = min(max(1, sample_size), 1000)
+
+        # Scan items up to sample_size, handling pagination
+        scanned = []
+        cursor = None
+        while len(scanned) < sample_size:
+            batch_size = min(100, sample_size - len(scanned))
+            data = await client.get_list_items(list_id, limit=batch_size, cursor=cursor)
+            items = data.get("items", [])
+            scanned.extend(items)
+
+            cursor = data.get("response_metadata", {}).get("next_cursor")
+            if not cursor or not items:
+                break
+
+        if not scanned:
+            return f"📝 No items found in list {list_id}, so no columns could be inferred. " \
+                   f"Add at least one item with values to discover its columns."
+
+        # The typed value keys a cell may carry (excludes bookkeeping keys)
+        type_keys = ["rich_text", "text", "date", "user", "select", "checkbox",
+                     "number", "email", "phone", "channel", "rating", "timestamp"]
+
+        columns: Dict[str, Dict[str, Any]] = {}
+        for item in scanned:
+            for field in item.get("fields", []):
+                column_id = field.get("column_id") or field.get("key")
+                if not column_id:
+                    continue
+
+                info = columns.setdefault(
+                    column_id, {"types": set(), "options": set(), "sample": None}
+                )
+
+                # Infer the type from whichever typed key is present
+                matched_type = False
+                for key in type_keys:
+                    if key in field and field[key] not in (None, [], ""):
+                        # "rich_text" is the storage form of a text column
+                        info["types"].add("text" if key == "rich_text" else key)
+                        matched_type = True
+
+                # A plain-text column can arrive with only the generic "value"
+                # (no typed key), so fall back to "text" rather than "unknown".
+                if not matched_type and field.get("value") not in (None, "", []):
+                    info["types"].add("text")
+
+                # Track select option IDs so they can be reused on writes
+                if field.get("select"):
+                    info["options"].update(field["select"])
+
+                # Keep one human-readable sample value
+                if info["sample"] is None:
+                    sample = extract_field_value(item, column_id)
+                    if sample not in (None, "", []):
+                        info["sample"] = sample
+
+        # Format the report
+        lines = [f"🧭 Discovered {len(columns)} column(s) in list {list_id} "
+                 f"(scanned {len(scanned)} item(s)):", ""]
+        for column_id in sorted(columns):
+            info = columns[column_id]
+            types = ", ".join(sorted(info["types"])) or "unknown"
+            line = f"• {column_id}  [type: {types}]"
+            if info["sample"] is not None:
+                sample = info["sample"]
+                if isinstance(sample, list):
+                    sample = ", ".join(str(v) for v in sample)
+                line += f"  e.g. {sample}"
+            if info["options"]:
+                line += f"\n    select options: {', '.join(sorted(info['options']))}"
+            lines.append(line)
+
+        return "\n".join(lines)
+
+    except SlackListsError as e:
+        return f"❌ Slack Lists error: {str(e)}"
+    except Exception as e:
+        logger.error(f"Unexpected error in discover_list_columns: {str(e)}")
+        return f"❌ Unexpected error: {str(e)}"
+
 # Server startup and configuration
-if __name__ == "__main__":
-    # Validate environment
+
+def main() -> None:
+    """Console entry point: validate config and run the MCP server over stdio."""
     token = os.getenv("SLACK_BOT_TOKEN")
     if not token:
         logger.error("SLACK_BOT_TOKEN environment variable is required")
-        exit(1)
-    
+        raise SystemExit(1)
+
     logger.info("Starting Slack Lists MCP Server...")
-    logger.info("Available tools: create_list_item, create_multiple_list_items, get_list_items, filter_list_items, export_list_items")
-    
+    logger.info(
+        "Available tools: create_list_item, create_multiple_list_items, "
+        "get_list_items, filter_list_items, export_list_items, "
+        "update_list_item, delete_list_item, discover_list_columns"
+    )
+
     # Run the MCP server
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
+
+# by Aditya Raj Singh — https://adityarajsingh.com/
 
